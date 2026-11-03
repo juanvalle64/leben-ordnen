@@ -594,26 +594,31 @@ const VIEWS={heute:vHeute,schulden:vSchulden,fristen:vFristen,budget:vBudget,kal
 /* ===== Verschlüsselte Startdaten (optional) ===== */
 const VAULT=(()=>{try{const t=$("#vault").textContent.trim();return t.startsWith("{")?JSON.parse(t):null}catch(e){return null}})();
 const UKEY=KEY+".unlocked";
-let LOCKED=!!VAULT&&!localStorage.getItem(UKEY);
+const VID=VAULT?String(VAULT.salt||"").slice(0,16):"";
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}},lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},lsDel=k=>{try{localStorage.removeItem(k)}catch(e){}};
+const hasUserData=()=>!!(S.profile.name||S.debts.length||S.tasks.length||S.events.length||S.budget.income.length||S.budget.fixed.length);
+/* Sperre, wenn ein Tresor existiert und (a) noch keine eigenen Daten da sind oder (b) dieser Tresor auf diesem Gerät noch nie entsperrt/übersprungen wurde */
+let LOCKED=!!VAULT&&(!hasUserData()||![("1:"+VID),("skip:"+VID)].includes(lsGet(UKEY)));
 async function unlockVault(pw){const b=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
  const km=await crypto.subtle.importKey("raw",new TextEncoder().encode(pw),"PBKDF2",false,["deriveKey"]);
  const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt:b(VAULT.salt),iterations:VAULT.iter,hash:"SHA-256"},km,{name:"AES-GCM",length:256},false,["decrypt"]);
  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:b(VAULT.iv)},key,b(VAULT.ct));return JSON.parse(new TextDecoder().decode(pt))}
 function vLock(){return `<header class="top"><div><h1>Leben ordnen</h1><div class="sub">Ein Schritt nach dem anderen.</div></div></header><div class="card"><div class="empty" style="padding:10px"><div class="ic">${ic("shield","lg")}</div><h3>Deine Daten sind verschlüsselt</h3><div class="small">Gib dein Passwort ein. Danach bleiben die Daten nur auf diesem Gerät.</div></div>
- <form data-form="unlock"><label class="f"><span>Passwort</span><input class="in" name="pw" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="wort-wort-wort-wort-1234"></label><button class="btn pri block" id="unlockBtn">${ic("check")} Entsperren</button></form>
+ <form data-form="unlock"><label class="f"><span>Passwort</span><div class="row" style="gap:6px"><input class="in" name="pw" id="pwIn" type="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Dein Passwort" style="flex:1"><button type="button" class="iconbtn" data-act="pwtoggle" aria-label="Passwort anzeigen" style="height:44px;width:44px">👁</button></div></label><button class="btn pri block" id="unlockBtn">${ic("check")} Entsperren</button></form>
  <div class="small muted" id="unlockMsg" style="margin-top:8px;min-height:18px"></div>
- <div class="row" style="justify-content:center;margin-top:6px"><button class="btn ghost sm" data-act="skipvault">Ohne Startdaten beginnen</button></div></div>`}
+ <div class="row" style="justify-content:center;margin-top:6px">${hasUserData()?`<button class="btn ghost sm" data-act="skipvault">Mit meinen bisherigen Daten weiter</button>`:`<button class="btn ghost sm" data-act="skipvault">Ohne Startdaten beginnen</button>`}</div></div>`}
 const _render=render;
 render=function(){if(LOCKED){$("#tabs").style.display="none";$("#main").innerHTML=`<div class="view">${vLock()}</div>`;return}$("#tabs").style.display="";_render()};
 document.addEventListener("submit",async e=>{const f=e.target;if(f.dataset.form!=="unlock")return;e.preventDefault();e.stopImmediatePropagation();
- const pw=(f.elements.pw.value||"").trim().toLowerCase(),msg=$("#unlockMsg"),btn=$("#unlockBtn");if(!pw)return;btn.disabled=true;msg.textContent="Entschlüssele …";
- try{const d=await unlockVault(pw);S=normalize(d);save();localStorage.setItem(UKEY,"1");LOCKED=false;applyTheme();nav();render();toast("Willkommen zurück"+(S.profile.name?", "+S.profile.name:"")+"!")}
- catch(x){btn.disabled=false;msg.textContent="Passwort stimmt nicht – bitte genau so eingeben, mit Bindestrichen."}},true);
+ const pw=f.elements.pw.value||"",msg=$("#unlockMsg"),btn=$("#unlockBtn");if(!pw)return;btn.disabled=true;msg.textContent="Entschlüssele …";
+ try{const d=await unlockVault(pw);S=normalize(d);save();lsSet(UKEY,"1:"+VID);LOCKED=false;applyTheme();nav();render();toast("Willkommen zurück"+(S.profile.name?", "+S.profile.name:"")+"!")}
+ catch(x){btn.disabled=false;msg.textContent="Passwort stimmt nicht – bitte nochmal genau eingeben."}},true);
 document.addEventListener("click",e=>{const el=e.target.closest("[data-act]");if(!el)return;
- if(el.dataset.act==="skipvault"){localStorage.setItem(UKEY,"skip");LOCKED=false;render()}
- if(el.dataset.act==="relock"){if(confirm("Startdaten mit Passwort neu laden? Deine Änderungen werden nach dem Entsperren ersetzt (vorher exportieren!).")){localStorage.removeItem(UKEY);LOCKED=true;closeSheet();render()}}},true);
+ if(el.dataset.act==="skipvault"){lsSet(UKEY,"skip:"+VID);LOCKED=false;nav();render()}
+ if(el.dataset.act==="pwtoggle"){const i=$("#pwIn");if(i){i.type=i.type==="password"?"text":"password";el.setAttribute("aria-label",i.type==="password"?"Passwort anzeigen":"Passwort verbergen");i.focus()}}
+ if(el.dataset.act==="relock"){if(confirm("Startdaten mit Passwort neu laden? Deine Änderungen werden nach dem Entsperren ersetzt (vorher exportieren!).")){lsDel(UKEY);LOCKED=true;closeSheet();render()}}},true);
 if(VAULT){const _ss=settingsSheet;settingsSheet=function(){_ss();const g=document.querySelector("#sheet .grid2:last-of-type");if(g)g.insertAdjacentHTML("beforeend",`<button class="btn" data-act="relock">${ic("shield","sm")} Startdaten (Passwort)</button>`)}}
-if("serviceWorker" in navigator&&location.protocol==="https:"){navigator.serviceWorker.register("sw.js",{scope:location.pathname}).catch(()=>{})}
+if("serviceWorker" in navigator&&location.protocol==="https:"){navigator.serviceWorker.register("sw.js",{scope:location.pathname.replace(/[^/]*$/,""),updateViaCache:"none"}).then(r=>r.update()).catch(()=>{})}
 
 applyTheme();go(location.hash.slice(1)||"heute");
 </script>
